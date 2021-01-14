@@ -82,6 +82,7 @@ def __from_nx_to_igraph(g, directed=None):
     :param directed:
     :return:
     """
+    from networkx.algorithms import bipartite
 
     if ig is None:
         raise ModuleNotFoundError(
@@ -91,6 +92,14 @@ def __from_nx_to_igraph(g, directed=None):
         directed = g.is_directed()
 
     gi = ig.Graph(directed=directed)
+
+    a_r = {}
+    if bipartite.is_bipartite(g):
+        A, B = bipartite.sets(g)
+        for a in A:
+            a_r[a] = 0
+        for b in B:
+            a_r[b] = 1
 
     ## Two problems to handle:
     # 1)in igraph, names have to be str.
@@ -111,6 +120,9 @@ def __from_nx_to_igraph(g, directed=None):
             # convert = {str(x):x for x in g.nodes()}
             gi.add_vertices(["\\"+str(n) for n in g.nodes()])
             gi.add_edges([("\\"+str(u), "\\"+str(v)) for (u, v) in g.edges()])
+
+    if bipartite.is_bipartite(g):
+        gi.vs['type'] = [a_r[name] if type(name)==int else a_r[int(name.replace("\\", ""))] for name in gi.vs["name"]]
 
     edgelist = nx.to_pandas_edgelist(g)
     for attr in edgelist.columns[2:]:
