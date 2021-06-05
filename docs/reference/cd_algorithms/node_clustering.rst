@@ -8,10 +8,12 @@ The communities can represent neat, *crisp*, partition as well as *overlapping* 
 .. note::
     The following lists are aligned to CD methods available in the *GitHub main branch* of `CDlib`_.
 
-    In particular, the current version of the library on pypl (that can be installed through pip) does not include the following algorithms: belief, ga.
+    In particular, the current version of the library on pypl (that can be installed through pip) does not include the following algorithms:
+    condor, core_expansion, dcs, threshold_clustering, lswl, lswl_plus, mod_m, mod_r, head_tail, lpanni, lpam, umstmo, kcut, symmnmf, scd, gemsec, pycombo, walkscan, paris, principled_clustering, ricci_community.
 
 
 .. automodule:: cdlib.algorithms
+
 
 ^^^^^^^^^^^^^^^^^
 Crisp Communities
@@ -19,6 +21,7 @@ Crisp Communities
 
 A clustering is said to be a *partition* if each node belongs to one and only one community.
 Methods in this subclass return as result a ``NodeClustering`` object instance.
+
 
 .. autosummary::
     :toctree: algs/
@@ -35,15 +38,25 @@ Methods in this subclass return as result a ``NodeClustering`` object instance.
     em
     ga
     gdmp2
+    gemsec
     girvan_newman
     greedy_modularity
+    head_tail
     infomap
+    kcut
     label_propagation
     leiden
     louvain
+    lswl
+    lswl_plus
     markov_clustering
+    mod_m
+    mod_r
+    paris
+    pycombo
     rber_pots
     rb_pots
+    ricci_community
     scan
     significance_communities
     spinglass
@@ -51,6 +64,8 @@ Methods in this subclass return as result a ``NodeClustering`` object instance.
     walktrap
     sbm_dl
     sbm_dl_nested
+    scd
+    threshold_clustering
 
 
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -67,21 +82,29 @@ Methods in this subclass return as result a ``NodeClustering`` object instance.
     big_clam
     conga
     congo
+    core_expansion
     danmf
+    dcs
     demon
     ego_networks
     egonet_splitter
     kclique
     lais2
     lemon
+    lpam
+    lpanni
     lfm
+    lpam
     multicom
-    nmnf
+    mnmf
     nnsed
     node_perception
     overlapping_seed_set_expansion
+    umstmo
     percomvc
     slpa
+    symmnmf
+    walkscan
     wCommunity
 
 
@@ -96,6 +119,7 @@ Methods in this subclass return as result a ``FuzzyNodeClustering`` object insta
     :toctree: algs/
 
     frc_fgsn
+    principled_clustering
 
 
 ^^^^^^^^^^^^^^
@@ -121,6 +145,7 @@ Methods in this subclass return as result a ``BiNodeClustering`` object instance
     :toctree: algs/
 
     bimlpa
+    condor
     CPM_Bipartite
     infomap_bipartite
 

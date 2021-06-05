@@ -189,6 +189,18 @@ class CommunityDiscoveryTests(unittest.TestCase):
             if os.path.exists(".tree"):
                 os.remove(".tree")
 
+            gg = ig.Graph(directed=True)
+            gg.add_vertices([v for v in h.nodes()])
+            gg.add_edges([(u, v) for u, v in h.edges()])
+
+            coms = algorithms.infomap(gg)
+            self.assertEqual(type(coms.communities), list)
+            if len(coms.communities) > 0:
+                self.assertEqual(type(coms.communities[0]), list)
+                self.assertEqual(type(coms.communities[0][0]), str)
+            if os.path.exists(".tree"):
+                os.remove(".tree")
+
     def test_lp(self):
         g = get_string_graph()
         coms = algorithms.label_propagation(g)
@@ -418,7 +430,17 @@ class CommunityDiscoveryTests(unittest.TestCase):
         self.assertEqual(type(coms.communities), list)
         if len(coms.communities) > 0:
             self.assertEqual(type(coms.communities[0]), list)
-            self.assertEqual(type(coms.communities[0][0]), tuple)
+            self.assertEqual(type(coms.communities[0][0]), str)
+            self.assertIsInstance(coms.allocation_matrix, dict)
+            self.assertEqual(len(coms.allocation_matrix), g.number_of_nodes())
+
+    def test_principled(self):
+        g = get_string_graph()
+        coms = algorithms.principled_clustering(g, 3)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), str)
             self.assertIsInstance(coms.allocation_matrix, dict)
             self.assertEqual(len(coms.allocation_matrix), g.number_of_nodes())
 
@@ -466,7 +488,7 @@ class CommunityDiscoveryTests(unittest.TestCase):
 
     def test_nmnf(self):
         g = nx.karate_club_graph()
-        coms = algorithms.nmnf(g)
+        coms = algorithms.mnmf(g)
         self.assertEqual(type(coms.communities), list)
         if len(coms.communities) > 0:
             self.assertEqual(type(coms.communities[0]), list)
@@ -535,7 +557,7 @@ class CommunityDiscoveryTests(unittest.TestCase):
         if len(communities.communities) > 0:
             self.assertEqual(type(communities.communities[0]), list)
             if len(communities.communities[0]) > 0:
-                self.assertEqual(type(communities.communities[0][0]), int)
+                self.assertEqual(type(communities.communities[0][0]), str)
 
         g = nx.karate_club_graph()
         nx.set_edge_attributes(g, values=1, name='weight')
@@ -605,3 +627,202 @@ class CommunityDiscoveryTests(unittest.TestCase):
             self.assertEqual(type(coms.communities[0]), list)
             self.assertEqual(type(coms.communities[0][0]), int)
 
+    def test_condor(self):
+
+        g = nx.algorithms.bipartite.random_graph(300, 100, 0.2)
+
+        communities = algorithms.condor(g)
+        self.assertEqual(type(communities.communities), list)
+        if len(communities.communities) > 0:
+            self.assertEqual(type(communities.communities[0]), list)
+            if len(communities.communities[0]) > 0:
+                self.assertEqual(type(communities.communities[0][0]), int)
+
+    def test_threshold_clustering(self):
+        g = get_string_graph()
+
+        for _, _, d in g.edges(data=True):
+            d['weight'] = 3
+
+        coms = algorithms.threshold_clustering(g)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), str)
+
+    def test_lswl(self):
+
+        G = nx.karate_club_graph()
+
+        coms = algorithms.lswl(G, 1, online=True)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+        coms = algorithms.lswl(G, 1, online=False)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+        coms = algorithms.lswl_plus(G, merge_outliers=False, detect_overlap=True)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+        coms = algorithms.lswl_plus(G, merge_outliers=True, detect_overlap=False)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_mod_m(self):
+
+        G = nx.karate_club_graph()
+
+        coms = algorithms.mod_m(G, 1)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_mod_r(self):
+
+        G = nx.karate_club_graph()
+
+        coms = algorithms.mod_r(G, 1)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_head_tail(self):
+
+        G = nx.karate_club_graph()
+
+        coms = algorithms.head_tail(G, 0.8)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_core_expansion(self):
+
+        G = nx.karate_club_graph()
+
+        coms = algorithms.core_expansion(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_lpanni(self):
+
+        G = nx.karate_club_graph()
+
+        coms = algorithms.lpanni(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_lpam(self):
+        G = nx.karate_club_graph()
+
+        coms =  algorithms.lpam(G, k=2, threshold=0.4, distance="amp")
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_dcs(self):
+        G = nx.karate_club_graph()
+
+        coms = algorithms.dcs(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_umstmo(self):
+        G = nx.karate_club_graph()
+
+        coms = algorithms.umstmo(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_kcut(self):
+        G = get_string_graph()
+
+        coms = algorithms.kcut(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), str)
+
+    def test_symmnmf(self):
+        G = nx.karate_club_graph()
+
+        coms = algorithms.symmnmf(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_scd(self):
+        G = nx.karate_club_graph()
+
+        coms = algorithms.scd(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_gemsec(self):
+        G = nx.karate_club_graph()
+
+        coms = algorithms.gemsec(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_pycombo(self):
+        G = nx.karate_club_graph()
+
+        coms = algorithms.pycombo(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_walkscan(self):
+        G = nx.karate_club_graph()
+
+        coms = algorithms.walkscan(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_paris(self):
+        G = nx.karate_club_graph()
+
+        coms = algorithms.paris(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)
+
+    def test_ricci(self):
+        G = nx.karate_club_graph()
+
+        coms = algorithms.ricci_community(G)
+        self.assertEqual(type(coms.communities), list)
+        if len(coms.communities) > 0:
+            self.assertEqual(type(coms.communities[0]), list)
+            self.assertEqual(type(coms.communities[0][0]), int)

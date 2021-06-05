@@ -23,6 +23,9 @@ try:
 except ModuleNotFoundError:
     gt = None
 
+import warnings
+import numpy as np
+from copy import deepcopy
 from cdlib.algorithms.internal import DER
 import community as louvain_modularity
 import warnings
@@ -37,10 +40,27 @@ from cdlib.algorithms.internal.FuzzyCom import fuzzy_comm
 from cdlib.algorithms.internal.Markov import markov
 from cdlib.algorithms.internal.ga import ga_community_detection
 from cdlib.algorithms.internal.SiblinarityAntichain import matrix_node_recursive_antichain_partition
-from karateclub import EdMot
+from cdlib.algorithms.internal.LSWL import LSWLCommunityDiscovery_offline, \
+    LSWLPlusCommunityDetection, LSWLCommunityDiscovery
+from cdlib.algorithms.internal.modularity_m import ModularityMCommunityDiscovery
+from cdlib.algorithms.internal.modularity_r import ModularityRCommunityDiscovery
+from cdlib.algorithms.internal.headtail import HeadTail
+from cdlib.algorithms.internal.Kcut import kcut_exec
+from cdlib.algorithms.internal.paris import paris as paris_alg, paris_best_clustering
+from cdlib.algorithms.internal.principled import principled
+
+try:
+    from GraphRicciCurvature.OllivierRicci import OllivierRicci
+except ModuleNotFoundError:
+    OllivierRicci = None
+
+import pycombo as pycombo_part
+
+from karateclub import EdMot, GEMSEC, SCD
 import markov_clustering as mc
 from chinese_whispers import chinese_whispers as cw
 from chinese_whispers import aggregate_clusters
+from thresholdclustering.thresholdclustering import best_partition as th_best_partition
 
 import networkx as nx
 
@@ -49,7 +69,9 @@ from cdlib.utils import convert_graph_formats, __from_nx_to_graph_tool, affiliat
 __all__ = ["louvain", "leiden", "rb_pots", "rber_pots", "cpm", "significance_communities", "surprise_communities",
            "greedy_modularity", "der", "label_propagation", "async_fluid", "infomap", "walktrap", "girvan_newman", "em",
            "scan", "gdmp2", "spinglass", "eigenvector", "agdl", "frc_fgsn", "sbm_dl", "sbm_dl_nested",
-           "markov_clustering", "edmot", "chinesewhispers", "siblinarity_antichain", "ga", "belief"]
+           "markov_clustering", "edmot", "chinesewhispers", "siblinarity_antichain", "ga", "belief",
+           "threshold_clustering", "lswl_plus", "lswl", "mod_m", "mod_r", "head_tail", "kcut", "gemsec", "scd",
+           "pycombo", "paris", "principled_clustering", "ricci_community"]
 
 
 def girvan_newman(g_original, level):
@@ -107,6 +129,8 @@ def em(g_original, k):
     :References:
 
     Newman, Mark EJ, and Elizabeth A. Leicht. `Mixture community and exploratory analysis in networks.  <https://www.pnas.org/content/104/23/9564/>`_  Proceedings of the National Academy of Sciences 104.23 (2007): 9564-9569.
+   
+    .. note:: Reference implementation: https://github.com/duckneo/CommunityDetection
     """
 
     g = convert_graph_formats(g_original, nx.Graph)
@@ -297,7 +321,7 @@ def agdl(g_original, number_communities, kc):
                                                                        "kc": kc})
 
 
-def louvain(g_original, weight='weight', resolution=1., randomize=False):
+def louvain(g_original, weight='weight', resolution=1., randomize=None):
     """
     Louvain  maximizes a modularity score for each community.
     The algorithm optimises the modularity in two elementary phases:
@@ -310,7 +334,7 @@ def louvain(g_original, weight='weight', resolution=1., randomize=False):
     :param g_original: a networkx/igraph object
     :param weight: str, optional the key in graph to use as weight. Default to 'weight'
     :param resolution: double, optional  Will change the size of the communities, default to 1.
-    :param randomize:  boolean, optional  Will randomize the node evaluation order and the community evaluation  order to get different partitions at each call, default False
+    :param randomize: int, RandomState instance or None, optional (default=None). If int, random_state is the seed used by the random number generator; If RandomState instance, random_state is the random number generator; If None, the random number generator is the RandomState instance used by `np.random`.
     :return: NodeClustering object
 
 
@@ -319,7 +343,7 @@ def louvain(g_original, weight='weight', resolution=1., randomize=False):
     >>> from cdlib import algorithms
     >>> import networkx as nx
     >>> G = nx.karate_club_graph()
-    >>> coms = algorithms.louvain(G, weight='weight', resolution=1., randomize=False)
+    >>> coms = algorithms.louvain(G, weight='weight', resolution=1.)
 
     :References:
 
@@ -339,8 +363,8 @@ def louvain(g_original, weight='weight', resolution=1., randomize=False):
 
     coms_louvain = [list(c) for c in coms_to_node.values()]
     return NodeClustering(coms_louvain, g_original, "Louvain",
-                          method_parameters={"weight": weight, "resolution": resolution,
-                                             "randomize": randomize})
+                          method_parameters={"weight": weight, "resolution": resolution, "randomize": randomize
+                                             })
 
 
 def leiden(g_original, initial_membership=None, weights=None):
@@ -658,12 +682,13 @@ def greedy_modularity(g_original, weight=None):
     return NodeClustering(coms, g_original, "Greedy Modularity", method_parameters={"weight": weight})
 
 
-def infomap(g_original):
+def infomap(g_original, flags=""):
     """
     Infomap is based on ideas of information theory.
     The algorithm uses the probability flow of random walks on a network as a proxy for information flows in the real system and it decomposes the network into modules by compressing a description of the probability flow.
 
     :param g_original: a networkx/igraph object
+    :param flags: str flags for Infomap
     :return: NodeClustering object
 
     :Example:
@@ -678,6 +703,8 @@ def infomap(g_original):
     Rosvall M, Bergstrom CT (2008) `Maps of random walks on complex networks reveal community structure. <https://www.pnas.org/content/105/4/1118/>`_ Proc Natl Acad SciUSA 105(4):1118–1123
 
     .. note:: Reference implementation: https://pypi.org/project/infomap/
+    
+    .. note:: Infomap Python API documentation: https://mapequation.github.io/infomap/python/
     """
 
     if imp is None:
@@ -685,32 +712,33 @@ def infomap(g_original):
     if pipes is None:
         raise ModuleNotFoundError("Optional dependency not satisfied: install package wurlitzer to use infomap.")
 
-    g = convert_graph_formats(g_original, nx.Graph)
+    g = convert_graph_formats(g_original, nx.Graph, directed=g_original.is_directed())
 
-    g.is_directed()
+    if g_original.is_directed() and "-d" not in flags and "--directed" not in flags:
+        flags += " -d"
 
     g1 = nx.convert_node_labels_to_integers(g, label_attribute="name")
     name_map = nx.get_node_attributes(g1, 'name')
     coms_to_node = defaultdict(list)
 
     with pipes():
-        im = imp.Infomap()
-        for e in g1.edges(data=True):
-            if len(e) == 3 and 'weight' in e[2]:
-                im.addLink(e[0], e[1], e[2]['weight'])
+        im = imp.Infomap(flags)
+
+        im.add_nodes(g1.nodes)
+
+        for source, target, data in g1.edges(data=True):
+            if 'weight' in data:
+                im.add_link(source, target, data['weight'])
             else:
-                im.addLink(e[0], e[1])
+                im.add_link(source, target)
         im.run()
 
-        for node in im.iterTree():
-            if node.isLeaf():
-                nid = node.physicalId
-                module = node.moduleIndex()
-                nm = name_map[nid]
-                coms_to_node[module].append(nm)
+        for node_id, module_id in im.modules:
+            node_name = name_map[node_id]
+            coms_to_node[module_id].append(node_name)
 
     coms_infomap = [list(c) for c in coms_to_node.values()]
-    return NodeClustering(coms_infomap, g_original, "Infomap", method_parameters={"": ""})
+    return NodeClustering(coms_infomap, g_original, "Infomap", method_parameters={"flags": flags})
 
 
 def walktrap(g_original):
@@ -888,7 +916,7 @@ def frc_fgsn(g_original, theta, eps, r):
     if maps is not None:
         coms = []
         for c in communities:
-            coms.append([tuple(maps[n]) for n in c])
+            coms.append([maps[n] for n in c])
 
         nx.relabel_nodes(g, maps, False)
         fuzz_assoc = {maps[nid]: v for nid, v in fuzz_assoc.items()}
@@ -897,6 +925,49 @@ def frc_fgsn(g_original, theta, eps, r):
 
     return FuzzyNodeClustering(coms, fuzz_assoc, g_original, "FuzzyComm", method_parameters={"theta": theta,
                                                                                              "eps": eps, "r": r})
+
+
+def principled_clustering(g_original, cluster_count):
+    """
+    An efficient and principled method for detecting communities in networks
+
+    :param g_original: networkx/igraph object
+    :param cluster_count: number of desired communities
+    :return: FuzzyNodeClustering object
+
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = principled_clustering(G, 3)
+
+
+    :References:
+
+    B Ball, B., & E JNewman, M. (2011). Anefficientandprincipled methodfordetectingcommunitiesinnetworks. Physical ReviewE, 84, 036103.
+
+    .. note:: Reference implementation: https://github.com/Zabot/principled_clustering
+    """
+
+    graph = convert_graph_formats(g_original, nx.Graph)
+    g, maps = nx_node_integer_mapping(graph)
+
+    communities, fuzz_assoc = principled(graph, cluster_count)
+
+    if maps is not None:
+        coms = []
+        for c in communities:
+            coms.append([maps[n] for n in c])
+
+        nx.relabel_nodes(g, maps, False)
+        fuzz_assoc = {maps[nid]: v for nid, v in fuzz_assoc.items()}
+    else:
+        coms = [list(c) for c in communities]
+
+    return FuzzyNodeClustering(coms, fuzz_assoc, g_original, "Principled Clustering",
+                               method_parameters={"cluster_count": cluster_count})
 
 
 def sbm_dl(g_original, B_min=None, B_max=None, deg_corr=True, **kwargs):
@@ -1226,6 +1297,16 @@ def ga(g_original, population=300, generation=30, r=1.5):
     """
 
     g = convert_graph_formats(g_original, nx.Graph)
+    flag = False
+    for _, _, d in g.edges(data=True):
+        if len(d) > 0:
+            flag = True
+        d.clear()
+
+    if flag:
+        warnings.warn(
+            'GA only works on unweighted graphs: edge attributes have been removed from the input network')
+
     coms = ga_community_detection(g, population, generation, r)
 
     return NodeClustering(coms, g_original, "ga",
@@ -1275,3 +1356,470 @@ def belief(g_original, max_it=100, eps=0.0001, reruns_if_not_conv=5, threshold=0
     return NodeClustering(res, g_original, "Belief",
                           method_parameters={"max_it": max_it, "eps": eps, 'reruns_if_not_conv': reruns_if_not_conv,
                                              "threshold": threshold, "q_max": q_max})
+
+
+def threshold_clustering(g_original, threshold_function=np.mean):
+    """
+    Developed for semantic similarity networks, this algorithm specifically targets **weighted** and **directed** graphs.
+
+    :param g_original: a networkx/igraph object
+    :param threshold_function: callable, optional
+        Ties smaller than threshold_function(out_ties) are deleted. Example: np.mean, np.median. Default is np.mean.
+    :return: NodeClustering object
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.threshold_clustering(G)
+
+    :References:
+
+    Guzzi, Pietro Hiram, Pierangelo Veltri, and Mario Cannataro. "Thresholding of semantic similarity networks using a spectral graph-based technique." International Workshop on New Frontiers in Mining Complex Patterns. Springer, Cham, 2013.
+
+    """
+
+    g = convert_graph_formats(g_original, nx.Graph)
+
+    if not nx.is_directed(g):
+        warnings.warn("Threshold Clustering is defined for directed graphs: the undirected graph in input will be treated as directed.")
+
+    if not nx.is_weighted(g):
+        raise ValueError("Threshold Clustering is defined only for weighted graphs.")
+
+    coms, _ = th_best_partition(g, threshold_function=threshold_function)
+
+    # Reshaping the results
+    coms_to_node = defaultdict(list)
+    for n, c in coms.items():
+        coms_to_node[c].append(n)
+
+    coms_louvain = [list(c) for c in coms_to_node.values()]
+    return NodeClustering(coms_louvain, g_original, "Threshold Clustering",
+                          method_parameters={})
+
+
+def lswl(g_original, query_node, strength_type=2, timeout=1.0, online=True):
+    """
+
+    LSWL locally discovers networks' the communities precisely, deterministically, and quickly.
+    This method works in a one-node-expansion model based on a notion of strong and weak links in a graph.
+
+    :param g_original: a networkx/igraph object
+    :param timeout: The maximum time in which LSWL should retrieve the community. Default is 1 second.
+    :param strength_type: 1 strengths between [-1,+1] or, 2 strengths between [0,1]. Default, 2.
+    :param query_node: Id of the network node whose local community is queried.
+    :param online: wehter the computation should happen in memory or not. Default, True.
+    :return: NodeClustering object
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.lswl(G, 1)
+
+    :References:
+
+    Fast Local Community Discovery: Relying on the Strength of Links (submitted for KDD 2021).
+
+    .. note:: Reference implementation: https://github.com/mahdi-zafarmand/LSWL
+
+    """
+
+    g = convert_graph_formats(g_original, nx.Graph)
+    if online:
+        community_searcher = LSWLCommunityDiscovery(g, strength_type, timeout)
+    else:
+        community_searcher = LSWLCommunityDiscovery_offline(g, strength_type, timeout)
+
+    community = community_searcher.community_search(start_node=query_node)
+    community_searcher.reset()
+
+    return NodeClustering([community], g_original, "LSWL",
+                          method_parameters={"query_node": query_node, "strength_type": strength_type,
+                                             "timeout": timeout, "online": online})
+
+
+def lswl_plus(g_original, strength_type=1, merge_outliers=True, detect_overlap=False):
+    """
+    LSWL+ is capable of finding a partition with overlapping communities or without them, based on user preferences.
+    This method can also find outliers (peripheral nodes of the graph that are marginally connected to communities) and hubs (nodes that bridge the communities)
+
+    :param g_original: a networkx/igraph object
+    :param strength_type: 1 strengths between [-1,+1] or, 2 strengths between [0,1]. Default, 2.
+    :param merge_outliers: If outliers need to merge into communities. Default, True.
+    :param detect_overlap: If overlapping communities need to be detected. Default, False
+    :return: NodeClustering object
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.lswl_plus(G)
+
+    :References:
+
+    Fast Local Community Discovery: Relying on the Strength of Links (submitted for KDD 2021)
+
+    .. note:: Reference implementation: https://github.com/mahdi-zafarmand/LSWL
+
+    """
+
+    g = convert_graph_formats(g_original, nx.Graph)
+
+    community_detector = LSWLPlusCommunityDetection(deepcopy(g), strength_type, merge_outliers, detect_overlap)
+    partition = community_detector.community_detection()
+
+    return NodeClustering(partition, g_original, "LSWL+",
+                          method_parameters={"strength_type": strength_type, "merge_outliers": merge_outliers,
+                                             "detect_overlap": detect_overlap})
+
+
+def mod_r(g_original, query_node):
+    """
+
+     Community Discovery algorithm that infers the hierarchy of communities that enclose a given vertex by exploring the graph one vertex at a time.
+
+    :param g_original: a networkx/igraph object
+    :param query_node: Id of the network node whose local community is queried.
+    :return: NodeClustering object
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.mod_r(G, 1)
+
+    :References:
+
+    Clauset, Aaron. "Finding local community structure in networks." Physical review E 72.2 (2005): 026132.
+
+    .. note:: Reference implementation: https://github.com/mahdi-zafarmand/LSWL
+
+    """
+
+    g = convert_graph_formats(g_original, nx.Graph)
+    community_searcher = ModularityRCommunityDiscovery(g)
+    community = community_searcher.community_search(start_node=query_node)
+    community_searcher.reset()
+
+    return NodeClustering([community], g_original, "mod_r",
+                          method_parameters={"query_node": query_node})
+
+
+def mod_m(g_original, query_node):
+    """
+    Community Discovery algorithm designed to find local optimal community structures in large networks starting from a given source vertex.
+
+    :param g_original: a networkx/igraph object
+    :param query_node: Id of the network node whose local community is queried.
+    :return: NodeClustering object
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.mod_m(G, 1)
+
+    :References:
+
+    Luo, Feng, James Z. Wang, and Eric Promislow. "Exploring local community structures in large networks." Web Intelligence and Agent Systems: An International Journal 6.4 (2008): 387-400.
+
+    .. note:: Reference implementation: https://github.com/mahdi-zafarmand/LSWL
+
+    """
+
+    g = convert_graph_formats(g_original, nx.Graph)
+    community_searcher = ModularityMCommunityDiscovery(g)
+    community = community_searcher.community_search(start_node=query_node)
+    community_searcher.reset()
+
+    return NodeClustering([community], g_original, "mod_m",
+                          method_parameters={"query_node": query_node})
+
+
+def head_tail(g_original, head_tail_ratio=0.4):
+    """
+    Identifying homogeneous communities in complex networks by applying head/tail breaks on edge betweenness given its heavy-tailed distribution.
+
+    Note: this implementation is suited for small-medium sized graphs, and it may take couple of minutes or longer for a bigger graph.
+
+    :param g_original: a networkx/igraph object
+    :param head_tail_ratio: head/tail division rule. Float in [0,1], dafault 0.4.
+    :return: NodeClustering object
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.head_tail()
+    >>> coms = algorithms.head_tail(G, head_tail_ratio=0.8)
+
+    :References:
+
+    Jiang B. and Ding M. (2015), Defining least community as a homogeneous group in complex networks, Physica A, 428, 154-160.
+
+    .. note:: Reference implementation: https://github.com/dingmartin/HeadTailCommunityDetection
+
+    """
+
+    g = convert_graph_formats(g_original, nx.Graph)
+    coms = HeadTail(g)
+
+    return NodeClustering(coms, g_original, "head_tail",
+                          method_parameters={"head_tail_ratio": head_tail_ratio})
+
+
+def kcut(g_original, kmax=4):
+    """
+    An Efficient Spectral Algorithm for Network Community Discovery.
+    Kcut is designed to provide a unique combination of recursive partitioning and direct k-way methods, able to guarantee the efficiency of a recursive approach, while also having the same accuracy as a direct k-way method.
+
+    :param g_original: a networkx/igraph object
+    :param kmax: maximum value of k, dafault 4.
+    :return: NodeClustering object
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.head_tail()
+    >>> coms = algorithms.kcut(G, head_tail_ratio=0.8)
+
+    :References:
+
+    Ruan, Jianhua, and Weixiong Zhang. "An efficient spectral algorithm for network community discovery and its applications to biological and social networks." Seventh IEEE International Conference on Data Mining (ICDM 2007). IEEE, 2007.
+
+    .. note:: Reference implementation: https://github.com/hmliangliang/kcut-algorithm
+
+    """
+
+    g = convert_graph_formats(g_original, nx.Graph)
+    coms = kcut_exec(g, kmax)
+
+    return NodeClustering(coms, g_original, "Kcut",
+                          method_parameters={"kmax": kmax})
+
+
+def gemsec(g_original, walk_number=5, walk_length=80, dimensions=32, negative_samples=5, window_size=5,
+           learning_rate=0.1, clusters=10, gamma=0.1, seed=42):
+    """
+    The procedure uses random walks to approximate the pointwise mutual information matrix obtained by pooling normalized adjacency matrix powers.
+    This matrix is decomposed by an approximate factorization technique which is combined with a k-means like clustering cost.
+
+    :param g_original: a networkx/igraph object
+    :param walk_number: Number of random walks. Default is 5.
+    :param walk_length: Length of random walks. Default is 80.
+    :param dimensions: Dimensionality of embedding. Default is 32.
+    :param negative_samples: Number of negative samples. Default is 5.
+    :param window_size: Matrix power order. Default is 5.
+    :param learning_rate: Gradient descent learning rate. Default is 0.1.
+    :param clusters: Number of cluster centers. Default is 10.
+    :param gamma: Clustering cost weight coefficient. Default is 0.1.
+    :param seed: Random seed value. Default is 42.
+    :return: NodeClustering object
+
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.gemsec(G)
+
+    :References:
+
+    Rozemberczki, B., Davies, R., Sarkar, R., & Sutton, C. (2019, August). Gemsec: Graph embedding with self clustering. In Proceedings of the 2019 IEEE/ACM international conference on advances in social networks analysis and mining (pp. 65-72).
+
+    .. note:: Reference implementation: https://karateclub.readthedocs.io/
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    model = GEMSEC(walk_number=walk_number, walk_length=walk_length, dimensions=dimensions,
+                   negative_samples=negative_samples, window_size=window_size,
+                   learning_rate=learning_rate, clusters=clusters, gamma=gamma, seed=seed)
+    model.fit(g)
+    members = model.get_memberships()
+
+    # Reshaping the results
+    coms_to_node = defaultdict(list)
+    for n, c in members.items():
+        coms_to_node[c].append(n)
+
+    coms = [list(c) for c in coms_to_node.values()]
+
+    return NodeClustering(coms, g_original, "GEMSEC", method_parameters={"walk_number": walk_number,
+                                                                         "walk_length": walk_length,
+                                                                         "dimensions": dimensions,
+                                                                         "negative_samples": negative_samples,
+                                                                         "window_size": window_size,
+                                                                         "learning_rate": learning_rate,
+                                                                         "clusters": clusters,
+                                                                         "gamma":gamma,
+                                                                         "seed": seed}, overlap=False)
+
+
+def scd(g_original, iterations=25, eps=1e-06, seed=42):
+    """
+    The procedure greedily optimizes the approximate weighted community clustering metric.
+    First, clusters are built around highly clustered nodes. Second, we refine the initial partition by using the approximate WCC.
+    These refinements happen for the whole vertex set.
+
+    :param g_original: a networkx/igraph object
+    :param iterations: Refinemeent iterations. Default is 25.
+    :param eps: Epsilon score for zero division correction. Default is 10**-6.
+    :param seed: Random seed value. Default is 42.
+    :return: NodeClustering object
+
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.scd(G)
+
+    :References:
+
+    Prat-Pérez, A., Dominguez-Sal, D., & Larriba-Pey, J. L. (2014, April). High quality, scalable and parallel community detection for large real graphs. In Proceedings of the 23rd international conference on World wide web (pp. 225-236).
+
+    .. note:: Reference implementation: https://karateclub.readthedocs.io/
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    model = SCD(iterations=iterations, eps=eps, seed=seed)
+    model.fit(g)
+    members = model.get_memberships()
+
+    # Reshaping the results
+    coms_to_node = defaultdict(list)
+    for n, c in members.items():
+        coms_to_node[c].append(n)
+
+    coms = [list(c) for c in coms_to_node.values()]
+
+    return NodeClustering(coms, g_original, "SCD", method_parameters={"iterations": iterations, "eps":eps,
+                                                                      "seed": seed}, overlap=False)
+
+
+def pycombo(g_original, weight='weight', max_communities=None,
+            modularity_resolution=1.0, num_split_attempts=0,
+            start_separate=False, treat_as_modularity=False, random_seed=42):
+    """
+    This is an implementation (for Modularity maximization) of the community detection algorithm called "Combo".
+
+    :param g_original: a networkx/igraph object
+    :param weight: Optional, defaults to weight. Graph edges property to use as weights. If None, graph assumed to be unweighted. Ignored if graph is passed as string (path to the file), or such property does not exist.
+    :param max_communities: Optional, defaults to None. Maximum number of communities. If <= 0 or None, assume to be infinite.
+    :param modularity_resolution: float, defaults to 1.0. Modularity resolution parameter.
+    :param num_split_attempts: int, defaults to 0. Number of split attempts. If 0, autoadjust this number automatically.
+    :param start_separate: bool, default False. Indicates if Combo should start from assigning each node into its own separate community. This could help to achieve higher modularity, but it makes execution much slower.
+    :param treat_as_modularity:  bool, default False. Indicates if edge weights should be treated as modularity scores. If True, the algorithm solves clique partitioning problem over the given graph, treated as modularity graph (matrix). For example, this allows users to provide their own custom 'modularity' matrix. modularity_resolution is ignored in this case.
+    :param random_seed: int, defaults to 42. Random seed to use.
+    :return: NodeClustering object
+
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.pycombo(G)
+
+    :References:
+
+    Sobolevsky, S., Campari, R., Belyi, A. and Ratti, C., 2014. General optimization technique for high-quality community detection in complex networks. Physical Review E, 90(1), p.012811.
+
+    .. note:: Reference implementation: https://github.com/Casyfill/pyCombo
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    partition = pycombo_part.execute(g, weight=weight, max_communities=max_communities,
+                                     modularity_resolution=modularity_resolution,
+                                     return_modularity=False, num_split_attempts=num_split_attempts,
+                                     start_separate=start_separate,
+                                     treat_as_modularity=treat_as_modularity, random_seed=random_seed)
+
+    # Reshaping the results
+    coms_to_node = defaultdict(list)
+    for n, c in partition.items():
+        coms_to_node[c].append(n)
+    coms = [list(c) for c in coms_to_node.values()]
+
+    return NodeClustering(coms, g_original, "pyCombo", method_parameters={}, overlap=False)
+
+
+def paris(g_original):
+    """
+    Paris is a hierarchical graph clustering algorithm inspired by modularity-based clustering techniques.
+    The algorithm is agglomerative and based on a simple distance between clusters induced by the probability of sampling node pairs.
+
+    :param g_original: a networkx/igraph object
+    :return: NodeClustering object
+
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.paris(G)
+
+    :References:
+
+    Bonald, T., Charpentier, B., Galland, A., & Hollocou, A. (2018). Hierarchical graph clustering using node pair sampling. arXiv preprint arXiv:1806.01664.
+
+    .. note:: Reference implementation: https://github.com/tbonald/paris
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    D = paris_alg(g)
+    clustering = paris_best_clustering(D)
+
+    return NodeClustering(clustering, g_original, "Paris", method_parameters={}, overlap=False)
+
+
+def ricci_community(g_original, alpha=0.5, method="Sinkhorn"):
+    """
+    Curvature is a geometric property to describe the local shape of an object. If we draw two parallel paths on a surface with positive curvature like a sphere, these two paths move closer to each other while for a negatively curved surface like a saddle, these two paths tend to be apart.
+    Currently there are multiple ways to discretize curvature on graph, in this algorithm, we include two of the most frequently used discrete Ricci curvature: Ollivier-Ricci curvature which is based on optimal transportation theory and Forman-Ricci curvature which is base on CW complexes.
+    Edge Ricci curvature is observed to play an important role in the graph structure.
+    An edge with positive curvature represents an edge within a cluster, while a negatively curved edge tent to be a bridge within clusters.
+    Also, negatively curved edges are highly related to graph connectivity, with negatively curved edges removed from a connected graph, the graph soon become disconnected.
+    Ricci flow is a process to uniformized the edge Ricci curvature of the graph.
+    For a given graph, the Ricci flow gives a "Ricci flow metric" on each edge as edge weights, such that under these edge weights, the Ricci curvature of the graph is mostly equal everywhere. In [Ni3], this "Ricci flow metric" is shown to be able to detect communities.
+    Both Ricci curvature and Ricci flow metric can act as a graph fingerprint for graph classification.
+    The different graph gives different edge Ricci curvature distributions and different Ricci flow metric.
+
+    :param g_original: a networkx/igraph object
+    :param alpha: The parameter for the probability distribution, range from [0 ~ 1]. It means the share of mass to leave on the original node. Default, 0.5.
+    :param method: Transportation method. [“OTD”, “ATD”, “Sinkhorn”]. Default: Sinkhorn
+    :return: NodeClustering object
+
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.ricci_community(G)
+
+    :References:
+
+    Ni, C. C., Lin, Y. Y., Luo, F., & Gao, J. (2019). Community detection on networks with ricci flow. Scientific reports, 9(1), 1-12.
+
+    .. note:: Reference implementation: https://github.com/saibalmars/GraphRicciCurvature
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    if OllivierRicci is None:
+        raise ModuleNotFoundError("Optional dependency not satisfied: install GraphRicciCurvature to use the selected feature.")
+
+    cricci = OllivierRicci(g, alpha=alpha, method=method)
+    _, clustering = cricci.ricci_community()
+    coms = defaultdict(list)
+
+    for k, v in clustering.items():
+        coms[v].append(k)
+
+    return NodeClustering(list(coms.values()), g_original, "Ricci", method_parameters={"alpha": alpha, "method": method}, overlap=False)

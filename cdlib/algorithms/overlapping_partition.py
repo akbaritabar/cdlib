@@ -6,6 +6,8 @@ try:
     from angel import Angel
 except ModuleNotFoundError:
     Angel = None
+
+from random import sample
 from demon import Demon
 from cdlib.algorithms.internal.NodePerception import NodePerception
 from cdlib.algorithms.internal import OSSE
@@ -22,13 +24,20 @@ from cdlib.algorithms.internal import LEMON
 from cdlib.algorithms.internal.SLPA_nx import slpa_nx
 from cdlib.algorithms.internal.multicom import MultiCom
 from cdlib.algorithms.internal.PercoMCV import percoMVC
-from karateclub import DANMF, EgoNetSplitter, NNSED, MNMF, BigClam
+from cdlib.algorithms.internal.LPAM import LPAM
+from cdlib.algorithms.internal.core_exp import findCommunities as core_exp_find
+from karateclub import DANMF, EgoNetSplitter, NNSED, MNMF, BigClam, SymmNMF
 from cdlib.algorithms.internal.weightedCommunity import weightedCommunity
+from cdlib.algorithms.internal.LPANNI import LPANNI, GraphGenerator
 from ASLPAw_package import ASLPAw
+from cdlib.algorithms.internal.DCS import main_dcs
+from cdlib.algorithms.internal.UMSTMO import UMSTMO
+from cdlib.algorithms.internal.walkscan import WalkSCAN
 
 __all__ = ["ego_networks", "demon", "angel", "node_perception", "overlapping_seed_set_expansion", "kclique", "lfm",
            "lais2", "congo", "conga", "lemon", "slpa", "multicom", "big_clam", "danmf", "egonet_splitter", "nnsed",
-           "nmnf", "aslpaw", "percomvc", "wCommunity"]
+           "mnmf", "aslpaw", "percomvc", "wCommunity",  "core_expansion", "lpanni", "lpam", "dcs", "umstmo",
+           "symmnmf", "walkscan"]
 
 
 def ego_networks(g_original, level=1):
@@ -725,9 +734,10 @@ def nnsed(g_original, dimensions=32, iterations=10, seed=42):
                                                                "seed": seed}, overlap=True)
 
 
-def nmnf(g_original, dimensions=128, clusters=10, lambd=0.2, alpha=0.05, beta=0.05, iterations=200, lower_control=1e-15, eta=5.0):
+def mnmf(g_original, dimensions=128, clusters=10, lambd=0.2, alpha=0.05, beta=0.05, iterations=200, lower_control=1e-15, eta=5.0):
     """
-    The procedure uses joint non-negative matrix factorization with modularity based regul;arization in order to learn a cluster memmbership distribution over nodes. The method can be used in an overlapping and non-overlapping way.
+    The procedure uses joint non-negative matrix factorization with modularity based regul;arization in order to learn a cluster memmbership distribution over nodes.
+    The method can be used in an overlapping and non-overlapping way.
 
     :param g_original: a networkx/igraph object
     :param dimensions: Number of dimensions. Default is 128.
@@ -746,7 +756,7 @@ def nmnf(g_original, dimensions=128, clusters=10, lambd=0.2, alpha=0.05, beta=0.
     >>> from cdlib import algorithms
     >>> import networkx as nx
     >>> G = nx.karate_club_graph()
-    >>> coms = algorithms.nmnf(G)
+    >>> coms = algorithms.mnmf(G)
 
     :References:
 
@@ -835,6 +845,7 @@ def percomvc(g_original):
 
     return NodeClustering(communities, g_original, "PercoMVC", method_parameters={}, overlap=True)
 
+
 def wCommunity(g_original, min_bel_degree=0.7, threshold_bel_degree=0.7, weightName="weight"):
     """
         Algorithm to identify overlapping communities in weighted graphs
@@ -872,7 +883,231 @@ def wCommunity(g_original, min_bel_degree=0.7, threshold_bel_degree=0.7, weightN
     # Result
     coms = comm.getCommunities()
     coms = [list(c) for c in coms]
-    return NodeClustering(coms, g_original, "wCommunity",
+
+    coms_res = []
+    for c in coms:
+        coms_res.append([g.vs[x]['name'] for x in c])
+
+    return NodeClustering(coms_res, g_original, "wCommunity",
                           method_parameters={"min_bel_degree": min_bel_degree,
                                              "threshold_bel_degree": threshold_bel_degree, 'weightName': weightName},
                           overlap=True)
+
+
+def core_expansion(g_original, tolerance=0.0001):
+    """
+    Core Expansion automatically detect the core of each possible community in the network. Then, it iteratively expand each core by adding the nodes to form the fnal communities. The expansion process is based on the neighborhood overlap measure.
+
+    :param g_original: a networkx/igraph object
+    :param tolerance: numerical tollerance, default 0.0001
+    :return: NodeClustering object
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.core_expansion(G)
+
+    :References:
+
+    Choumane, Ali, Ali Awada, and Ali Harkous. "Core expansion: a new community detection algorithm based on neighborhood overlap." Social Network Analysis and Mining 10 (2020): 1-11.
+
+    .. note:: Reference implementation: https://github.com/pkalkunte18/CoreExpansionAlgorithm
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    communities = core_exp_find(g, tolerance)
+
+    return NodeClustering(communities, g_original, "Core Expansion", method_parameters={"tolerance": tolerance},
+                          overlap=True)
+
+
+def lpanni(g_original, threshold=0.1):
+    """
+
+    LPANNI (Label Propagation Algorithm with Neighbor Node Influence) detects overlapping community structures by adopting fixed label propagation sequence based on the ascending order of node importance and label update strategy based on neighbor node influence and historical label preferred strategy.
+
+    :param g_original: a networkx/igraph object
+    :param threshold: Default 0.0001
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.lpanni(G)
+
+    :References:
+
+    Lu, Meilian, et al. "LPANNI: Overlapping community detection using label propagation in large-scale complex networks." IEEE Transactions on Knowledge and Data Engineering 31.9 (2018): 1736-1749.
+
+    .. note:: Reference implementation: https://github.com/wxwmd/LPANNI
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    LPANNI(g)
+    gen = GraphGenerator(threshold, g)
+    communities = [list(c) for c in gen.get_Overlapping_communities()]
+
+    return NodeClustering(communities, g_original, "LPANNI", method_parameters={"threshold": threshold},
+                          overlap=True)
+
+
+def lpam(g_original, k=2, threshold=0.5, distance="amp", seed=0):
+    """
+    Link Partitioning Around Medoids
+
+    :param g_original: a networkx/igraph object
+    :param k: number of clusters
+    :param threshold: merging threshold in [0,1], default 0.5
+    :param distance: type of distance: "amp" - amplified commute distance, or "cm" - commute distance, or distance matrix between all edges as np ndarray
+    :param seed: random seed for k-medoid heuristic
+    :return: NodeClustering object
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.lpam(G, k=2, threshold=0.4, distance = "amp")
+
+    :References:
+
+    Alexander Ponomarenko, Leonidas Pitsoulis, Marat Shamshetdinov. "Link Partitioning Around Medoids". https://arxiv.org/abs/1907.08731
+
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    return LPAM(graph=g, k=k, threshold=threshold, distance=distance, seed=seed)
+
+
+def dcs(g_original):
+    """
+    Divide and Conquer Strategy
+
+    :param g_original: a networkx/igraph object
+    :return: NodeClustering object
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.dcs(G)
+
+    :References:
+
+     Syed Agha Muhammad and Kristof Van Laerhoven. "DCS: Divide and Conquer Strategy For Detecting Overlapping Communities in Social Graphs". https://bit.ly/33m7t3r
+
+    .. note:: Reference implementation: https://github.com/SyedAgha/Divide-and-Conquer/tree/master/DCS_code_and_paper
+
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    communities = main_dcs(g)
+    return NodeClustering(communities, g_original, "DCS", method_parameters={}, overlap=True)
+
+
+def umstmo(g_original):
+    """
+    Overlapping community detection based on the union of all maximum spanning trees
+
+    :param g_original: a networkx/igraph object
+    :return: NodeClustering object
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.umstmo(G)
+
+    :References:
+
+     Asmi, Khawla, Dounia Lotfi, and Mohamed El Marraki. "Overlapping community detection based on the union of all maximum spanning trees." Library Hi Tech (2020).
+
+    .. note:: Reference implementation: https://github.com/khawka/UMSTMO
+
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    communities = UMSTMO(g)
+    return NodeClustering(communities, g_original, "UMSTMO", method_parameters={}, overlap=True)
+
+
+def symmnmf(g_original, dimensions=32, iterations=200, rho=100.0, seed=42):
+    """
+    The procedure decomposed the second power od the normalized adjacency matrix with an ADMM based non-negative matrix factorization based technique.
+    This results in a node embedding and each node is associated with an embedding factor in the created latent space.
+
+    :param g_original: a networkx/igraph object
+    :param dimensions: Number of dimensions. Default is 32.
+    :param iterations:  Number of power iterations. Default is 200.
+    :param rho: Regularization tuning parameter. Default is 100.0.
+    :param seed: Random seed value. Default is 42.
+    :return: NodeClustering object
+
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.symmnmf(G)
+
+    :References:
+
+    Kuang, Da, Chris Ding, and Haesun Park. "Symmetric nonnegative matrix factorization for graph clustering." Proceedings of the 2012 SIAM international conference on data mining. Society for Industrial and Applied Mathematics, 2012.
+
+    .. note:: Reference implementation: https://karateclub.readthedocs.io/
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    model = SymmNMF(dimensions=dimensions, iterations=iterations, rho=rho, seed=seed)
+    model.fit(g)
+    members = model.get_memberships()
+
+    # Reshaping the results
+    coms_to_node = defaultdict(list)
+    for n, c in members.items():
+        coms_to_node[c].append(n)
+
+    coms = [list(c) for c in coms_to_node.values()]
+
+    return NodeClustering(coms, g_original, "SymmNMF", method_parameters={"dimension": dimensions,
+                                                                          "iterations": iterations,
+                                                                          "rho": rho, "seed": seed}, overlap=True)
+
+
+def walkscan(g_original, nb_steps=2, eps=0.1, min_samples=3, init_vector=None):
+    """
+    Random walk community detection method leveraging PageRank node scoring.
+
+    :param g_original: a networkx/igraph object
+    :param nb_steps: the length of the random walk
+    :param eps: DBSCAN eps
+    :param min_samples: DBSCAN min_samples
+    :param init_vector: dictionary node_id -> initial_probability to initialize the random walk. Default, random selected node with probability set to 1.
+    :return: NodeClustering object
+
+
+    :Example:
+
+    >>> from cdlib import algorithms
+    >>> import networkx as nx
+    >>> G = nx.karate_club_graph()
+    >>> coms = algorithms.walkscan(G)
+
+    :References:
+
+    Hollocou, A., Bonald, T., & Lelarge, M. (2016). Improving PageRank for local community detection. arXiv preprint arXiv:1610.08722.
+
+    .. note:: Reference implementation: https://github.com/ahollocou/walkscan
+    """
+    g = convert_graph_formats(g_original, nx.Graph)
+    ws = WalkSCAN(nb_steps=nb_steps, eps=eps, min_samples=min_samples)
+
+    # Initialization vector for the random walk
+    if init_vector is None:
+        n = sample(list(g.nodes()), 1)[0]
+        init_vector = {n: 1}
+
+    ws.detect_communities(g, init_vector)
+    coms = [list(c) for c in ws.communities_]
+
+    return NodeClustering(coms, g_original, "walkscan", method_parameters={"nb_steps": nb_steps, "eps": eps,
+                                                                           "min_samples": min_samples,
+                                                                           "init_vector": init_vector}, overlap=True)
